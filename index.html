@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JAG Media Upload</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="JAG Upload">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      width: 100%;
+      max-width: 500px;
+      margin-top: 20px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1d1d1f;
+    }
+    .header p {
+      font-size: 14px;
+      color: #86868b;
+      margin-top: 6px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1d1d1f;
+      margin-bottom: 6px;
+    }
+    label .hint {
+      font-weight: 400;
+      color: #86868b;
+      font-size: 13px;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d2d2d7;
+      border-radius: 10px;
+      font-size: 16px;
+      font-family: inherit;
+      background: #fff;
+      transition: border-color 0.2s;
+      -webkit-appearance: none;
+    }
+    input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: #0071e3;
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .file-upload {
+      border: 2px dashed #d2d2d7;
+      border-radius: 12px;
+      padding: 30px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: #fff;
+    }
+    .file-upload:hover, .file-upload.dragover {
+      border-color: #0071e3;
+      background: #f0f5ff;
+    }
+    .file-upload.has-file {
+      border-color: #34c759;
+      background: #f0faf3;
+    }
+    .file-upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .file-upload-text { font-size: 15px; color: #86868b; }
+    .file-upload-name {
+      font-size: 14px;
+      color: #1d1d1f;
+      font-weight: 600;
+      margin-top: 6px;
+      word-break: break-all;
+    }
+    .file-upload input[type="file"] { display: none; }
+
+    .submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: #0071e3;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 10px;
+    }
+    .submit-btn:hover { background: #0077ed; }
+    .submit-btn:disabled {
+      background: #d2d2d7;
+      cursor: not-allowed;
+    }
+
+    .status {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 15px;
+      min-height: 24px;
+    }
+    .status.success { color: #34c759; font-weight: 600; }
+    .status.error { color: #ff3b30; }
+    .status.uploading { color: #0071e3; }
+
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #0071e3;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>JAG Media Upload</h1>
+      <p>Upload photos and videos for social media</p>
+    </div>
+
+    <form id="uploadForm">
+      <div class="form-group">
+        <div class="file-upload" id="dropZone">
+          <div class="file-upload-icon">📎</div>
+          <div class="file-upload-text">Tap to choose a photo or video</div>
+          <div class="file-upload-name" id="fileName"></div>
+          <input type="file" id="fileInput" accept="image/*,video/*" capture="environment">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>What's this from?</label>
+        <input type="text" id="description" placeholder="e.g. Harbor cleanup event, Council meeting">
+      </div>
+
+      <div class="form-group">
+        <label>Anyone notable present? <span class="hint">(for tagging)</span></label>
+        <input type="text" id="vips" placeholder="e.g. Mayor Scott, Sen. Jones, Director Smith">
+      </div>
+
+      <div class="form-group">
+        <label>Event / Location</label>
+        <input type="text" id="event" placeholder="e.g. City Hall, Inner Harbor, District 12 Office">
+      </div>
+
+      <div class="form-group">
+        <label>Anything else to know?</label>
+        <textarea id="notes" placeholder="Optional — any extra context for the post"></textarea>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submitBtn">Submit to JAG</button>
+      <div class="status" id="status"></div>
+    </form>
+  </div>
+
+  <script>
+    // Google Apps Script web app URL — will be set after deployment
+    const SCRIPT_URL = '__APPS_SCRIPT_URL__';
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const form = document.getElementById('uploadForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const status = document.getElementById('status');
+
+    // File selection
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        showFile(e.dataTransfer.files[0]);
+      }
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) showFile(fileInput.files[0]);
+    });
+
+    function showFile(file) {
+      fileName.textContent = file.name + ' (' + formatSize(file.size) + ')';
+      dropZone.classList.add('has-file');
+      dropZone.querySelector('.file-upload-text').textContent = 'Tap to change';
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    // Submit
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const file = fileInput.files[0];
+      if (!file) {
+        status.textContent = 'Please choose a photo or video first.';
+        status.className = 'status error';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      status.innerHTML = '<span class="spinner"></span> Uploading...';
+      status.className = 'status uploading';
+
+      try {
+        const base64 = await toBase64(file);
+        const payload = {
+          file: base64,
+          filename: file.name,
+          mimeType: file.type,
+          description: document.getElementById('description').value,
+          vips: document.getElementById('vips').value,
+          event: document.getElementById('event').value,
+          notes: document.getElementById('notes').value
+        };
+
+        const response = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          status.textContent = 'Submitted! Thank you.';
+          status.className = 'status success';
+          form.reset();
+          fileName.textContent = '';
+          dropZone.classList.remove('has-file');
+          dropZone.querySelector('.file-upload-text').textContent = 'Tap to choose a photo or video';
+        } else {
+          throw new Error(result.error || 'Upload failed');
+        }
+      } catch (err) {
+        status.textContent = 'Upload failed — please try again.';
+        status.className = 'status error';
+        console.error(err);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    function toBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+  </script>
+</body>
+</html>
