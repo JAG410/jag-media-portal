@@ -39,6 +39,21 @@ function doPost(e) {
       + 'Notes: ' + (data.notes || 'None') + '\n';
     folder.createFile(metaName, metaContent, 'text/plain');
 
+    // Send email notification
+    var emailBody = 'New media uploaded to Social Staged\n\n'
+      + 'File: ' + data.filename + '\n'
+      + 'Description: ' + (data.description || 'None') + '\n'
+      + 'VIPs/Stakeholders: ' + (data.vips || 'None') + '\n'
+      + 'Event/Location: ' + (data.event || 'None') + '\n'
+      + 'Notes: ' + (data.notes || 'None') + '\n'
+      + '\nUploaded: ' + timestamp + '\n'
+      + 'View in Drive: ' + folder.getUrl();
+    GmailApp.sendEmail(
+      'johnsonadvisorygrp@gmail.com',
+      'JAG Media Upload — ' + (data.description || data.filename),
+      emailBody
+    );
+
     return ContentService
       .createTextOutput(JSON.stringify({ success: true }))
       .setMimeType(ContentService.MimeType.JSON);
