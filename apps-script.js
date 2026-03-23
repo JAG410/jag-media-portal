@@ -1,5 +1,5 @@
 // ============================================================
-// JAG Media Upload — Google Apps Script Backend (v3)
+// JAG Media Upload -Google Apps Script Backend (v3)
 // ============================================================
 // CHANGES IN V3:
 // - Chunked upload: each file sent individually to avoid payload limits
@@ -22,7 +22,7 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     var action = data.action || 'legacy';
 
-    // ---- STEP 1: INIT — create subfolder, return folderId ----
+    // ---- STEP 1: INIT -create subfolder, return folderId ----
     if (action === 'init') {
       var socialFolder = getOrCreateFolder('D12 Pipeline/Social Staged');
       var timestamp = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
@@ -42,7 +42,7 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // ---- STEP 2: FILE — upload one file to existing folder ----
+    // ---- STEP 2: FILE -upload one file to existing folder ----
     if (action === 'file') {
       var folder = DriveApp.getFolderById(data.folderId);
       var blob = Utilities.newBlob(
@@ -57,7 +57,7 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // ---- STEP 3: FINISH — write metadata + send email ----
+    // ---- STEP 3: FINISH -write metadata + send email ----
     if (action === 'finish') {
       var folder = DriveApp.getFolderById(data.folderId);
       var folderName = data.folderName;
@@ -100,22 +100,22 @@ function doPost(e) {
       var draftCaption = generateCaption(data);
 
       // Send email
-      var emailSubject = 'JAG Media Upload — ' + (data.description || 'New Upload')
+      var emailSubject = 'JAG Media Upload -' + (data.description || 'New Upload')
         + ' (' + fileNames.length + ' file' + (fileNames.length === 1 ? '' : 's') + ')';
 
       var emailBody = 'New media uploaded to Social Staged\n'
-        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
+        + '------------------------------\n\n'
         + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
         + 'Files: ' + fileNames.length + ' (' + fileNames.join(', ') + ')\n'
         + 'Description: ' + (data.description || 'None') + '\n'
         + 'VIPs: ' + (data.vips || 'None') + '\n'
         + 'Event/Location: ' + (data.event || 'None') + '\n'
         + 'Notes: ' + (data.notes || 'None') + '\n\n'
-        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        + '------------------------------\n'
         + 'DRAFT CAPTION (edit as needed):\n'
-        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
+        + '------------------------------\n\n'
         + draftCaption + '\n\n'
-        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        + '------------------------------\n'
         + 'View folder in Drive: ' + folder.getUrl() + '\n'
         + 'Uploaded: ' + timestamp + ' ' + timeHM + '\n';
 
