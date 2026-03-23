@@ -32,7 +32,7 @@
     .header h1 {
       font-size: 26px;
       font-weight: 700;
-      color: #fff;
+      color: #c9a84c;
       letter-spacing: -0.5px;
     }
     .header p {
@@ -55,7 +55,7 @@
       color: #86868b;
       font-size: 13px;
     }
-    input[type="text"], textarea {
+    input[type="text"], textarea, select {
       width: 100%;
       padding: 12px 14px;
       border: 1px solid #333;
@@ -67,9 +67,26 @@
       transition: border-color 0.2s;
       -webkit-appearance: none;
     }
-    input[type="text"]:focus, textarea:focus {
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23c9a84c' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
+      cursor: pointer;
+    }
+    select option {
+      background: #1c1c1e;
+      color: #f5f5f7;
+    }
+    .other-name-input {
+      margin-top: 8px;
+      display: none;
+    }
+    input[type="text"]:focus, textarea:focus, select:focus {
       outline: none;
-      border-color: #0a84ff;
+      border-color: #c9a84c;
     }
     input[type="text"]::placeholder, textarea::placeholder {
       color: #636366;
@@ -86,8 +103,8 @@
       background: #1c1c1e;
     }
     .file-upload:hover, .file-upload.dragover {
-      border-color: #0a84ff;
-      background: #0a84ff10;
+      border-color: #c9a84c;
+      background: #c9a84c10;
     }
     .file-upload.has-file {
       border-color: #30d158;
@@ -149,17 +166,17 @@
     .submit-btn {
       width: 100%;
       padding: 14px;
-      background: #0a84ff;
-      color: #fff;
+      background: linear-gradient(135deg, #c9a84c, #a8893a);
+      color: #000;
       border: none;
       border-radius: 10px;
       font-size: 17px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: opacity 0.2s;
       margin-top: 10px;
     }
-    .submit-btn:hover { background: #0077ed; }
+    .submit-btn:hover { opacity: 0.9; }
     .submit-btn:disabled {
       background: #333;
       color: #636366;
@@ -174,13 +191,13 @@
     }
     .status.success { color: #30d158; font-weight: 600; }
     .status.error { color: #ff453a; }
-    .status.uploading { color: #0a84ff; }
+    .status.uploading { color: #c9a84c; }
 
     .spinner {
       display: inline-block;
       width: 18px;
       height: 18px;
-      border: 2px solid #0a84ff;
+      border: 2px solid #c9a84c;
       border-top-color: transparent;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
@@ -200,7 +217,7 @@
     }
     .progress-bar {
       height: 100%;
-      background: #0a84ff;
+      background: linear-gradient(90deg, #c9a84c, #e0c56a);
       border-radius: 6px;
       transition: width 0.3s ease;
       width: 0%;
@@ -210,8 +227,8 @@
       width: 100%;
       padding: 14px;
       background: transparent;
-      color: #0a84ff;
-      border: 1px solid #0a84ff;
+      color: #c9a84c;
+      border: 1px solid #c9a84c;
       border-radius: 10px;
       font-size: 17px;
       font-weight: 600;
@@ -221,7 +238,7 @@
       display: none;
     }
     .upload-more-btn:hover {
-      background: #0a84ff15;
+      background: #c9a84c15;
     }
 
     .footer {
@@ -233,12 +250,12 @@
     .footer-line {
       width: 40px;
       height: 1px;
-      background: #333;
+      background: #c9a84c40;
       margin: 0 auto 12px;
     }
     .footer p {
       font-size: 12px;
-      color: #48484a;
+      color: #c9a84c80;
       letter-spacing: 0.5px;
       text-transform: uppercase;
       font-weight: 500;
@@ -255,7 +272,14 @@
     <form id="uploadForm">
       <div class="form-group">
         <label>Your Name</label>
-        <input type="text" id="uploaderName" placeholder="e.g. Christina, Mike, Delegate Carter">
+        <select id="uploaderSelect">
+          <option value="" disabled selected>Select your name</option>
+          <option value="Christina">Christina</option>
+          <option value="CM Jones">CM Jones</option>
+          <option value="Kony">Kony</option>
+          <option value="other">Other</option>
+        </select>
+        <input type="text" id="uploaderOther" class="other-name-input" placeholder="Enter your name">
       </div>
 
       <div class="form-group">
@@ -315,14 +339,35 @@
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
     const uploadMoreBtn = document.getElementById('uploadMoreBtn');
-    const uploaderNameInput = document.getElementById('uploaderName');
+    const uploaderSelect = document.getElementById('uploaderSelect');
+    const uploaderOther = document.getElementById('uploaderOther');
 
     let selectedFiles = [];
     const LARGE_FILE_MB = 25;
 
-    // Remember uploader name
+    // Remember uploader selection
     const savedName = localStorage.getItem('jag_uploader_name');
-    if (savedName) uploaderNameInput.value = savedName;
+    if (savedName) {
+      const option = uploaderSelect.querySelector('option[value="' + savedName + '"]');
+      if (option && savedName !== 'other') {
+        uploaderSelect.value = savedName;
+      } else {
+        uploaderSelect.value = 'other';
+        uploaderOther.style.display = 'block';
+        uploaderOther.value = savedName;
+      }
+    }
+
+    // Show/hide Other input
+    uploaderSelect.addEventListener('change', () => {
+      if (uploaderSelect.value === 'other') {
+        uploaderOther.style.display = 'block';
+        uploaderOther.focus();
+      } else {
+        uploaderOther.style.display = 'none';
+        uploaderOther.value = '';
+      }
+    });
 
     // File selection
     dropZone.addEventListener('click', () => fileInput.click());
@@ -423,11 +468,21 @@
         return;
       }
 
-      const uploaderName = uploaderNameInput.value.trim();
-      if (!uploaderName) {
-        status.textContent = 'Please enter your name.';
+      let uploaderName = '';
+      if (uploaderSelect.value === 'other') {
+        uploaderName = uploaderOther.value.trim();
+        if (!uploaderName) {
+          status.textContent = 'Please enter your name.';
+          status.className = 'status error';
+          uploaderOther.focus();
+          return;
+        }
+      } else if (uploaderSelect.value) {
+        uploaderName = uploaderSelect.value;
+      } else {
+        status.textContent = 'Please select your name.';
         status.className = 'status error';
-        uploaderNameInput.focus();
+        uploaderSelect.focus();
         return;
       }
 
