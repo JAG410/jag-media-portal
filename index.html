@@ -458,6 +458,54 @@
       });
     }
 
+    // Compress image on client side before upload (max 2048px, JPEG 85%)
+    // Videos pass through unchanged
+    function compressImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!file.type.startsWith('image/')) {
+          // Not an image (video etc) — return as-is
+          resolve({ base64: null, file: file, wasCompressed: false });
+          return;
+        }
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const MAX_DIM = 2048;
+          let w = img.width, h = img.height;
+          if (w > MAX_DIM || h > MAX_DIM) {
+            if (w > h) { h = Math.round(h * MAX_DIM / w); w = MAX_DIM; }
+            else { w = Math.round(w * MAX_DIM / h); h = MAX_DIM; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const base64 = dataUrl.split(',')[1];
+          resolve({ base64: base64, mimeType: 'image/jpeg', wasCompressed: true });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          // Fall back to raw file if image can't be loaded
+          resolve({ base64: null, file: file, wasCompressed: false });
+        };
+        img.src = url;
+      });
+    }
+
+    // Get base64 for a file — compress images, pass through videos
+    async function prepareFile(file) {
+      const compressed = await compressImage(file);
+      if (compressed.wasCompressed) {
+        return { base64: compressed.base64, mimeType: compressed.mimeType };
+      }
+      // Not compressed — read raw
+      const base64 = await toBase64(file);
+      return { base64: base64, mimeType: file.type };
+    }
+
     // Helper: POST JSON to Apps Script and parse response
     async function postToScript(payload) {
       const response = await fetch(SCRIPT_URL, {
@@ -528,18 +576,21 @@
         const fileNames = [];
         for (let i = 0; i < totalFiles; i++) {
           status.innerHTML = '<span class="spinner"></span> Uploading file ' + (i + 1) + ' of ' + totalFiles + '...';
-          const base64 = await toBase64(selectedFiles[i]);
+          const prepared = await prepareFile(selectedFiles[i]);
+          const fileName = selectedFiles[i].type.startsWith('image/')
+            ? selectedFiles[i].name.replace(/\.[^.]+$/, '.jpg')
+            : selectedFiles[i].name;
 
           const fileResult = await postToScript({
             action: 'file',
             folderId: folderId,
-            fileData: base64,
-            fileName: selectedFiles[i].name,
-            mimeType: selectedFiles[i].type
+            fileData: prepared.base64,
+            fileName: fileName,
+            mimeType: prepared.mimeType
           });
 
-          if (!fileResult.success) throw new Error(fileResult.error || 'Failed to upload ' + selectedFiles[i].name);
-          fileNames.push(selectedFiles[i].name);
+          if (!fileResult.success) throw new Error(fileResult.error || 'Failed to upload ' + fileName);
+          fileNames.push(fileName);
 
           // Progress: 10% for init, 10-80% for files, 80-100% for finish
           progressBar.style.width = (10 + Math.round(((i + 1) / totalFiles) * 70)) + '%';
