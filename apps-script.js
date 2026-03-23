@@ -1,12 +1,11 @@
 // ============================================================
-// JAG Media Upload — Google Apps Script Backend (v2)
+// JAG Media Upload — Google Apps Script Backend (v3)
 // ============================================================
-// CHANGES IN V2:
-// - Multi-file upload support (all files in one request)
-// - Creates date+description subfolder in Social Staged
-// - Uploader name tracked in metadata
-// - Draft caption generated in D12 voice
-// - Email includes all photos as attachments + draft caption
+// CHANGES IN V3:
+// - Chunked upload: each file sent individually to avoid payload limits
+// - Step 1: "init" action creates subfolder, returns folderId
+// - Step 2: "file" action uploads one file to that folder
+// - Step 3: "finish" action writes metadata + sends email
 // ============================================================
 // SETUP / REDEPLOYMENT:
 // 1. Go to https://script.google.com
@@ -21,103 +20,125 @@
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
+    var action = data.action || 'legacy';
 
-    // Get or create the target folder: D12 Pipeline/Social Staged
-    var socialFolder = getOrCreateFolder('D12 Pipeline/Social Staged');
+    // ---- STEP 1: INIT — create subfolder, return folderId ----
+    if (action === 'init') {
+      var socialFolder = getOrCreateFolder('D12 Pipeline/Social Staged');
+      var timestamp = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+      var descSlug = (data.description || 'upload').substring(0, 40)
+        .replace(/[^a-zA-Z0-9 ]/g, '')
+        .replace(/\s+/g, '-')
+        .toLowerCase();
+      var subfolderName = timestamp + '_' + descSlug;
+      var batchFolder = socialFolder.createFolder(subfolderName);
 
-    // Create a subfolder for this batch: YYYY-MM-DD_Description
-    var timestamp = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
-    var timeHM = Utilities.formatDate(new Date(), 'America/New_York', 'HH-mm');
-    var descSlug = (data.description || 'upload').substring(0, 40)
-      .replace(/[^a-zA-Z0-9 ]/g, '')
-      .replace(/\s+/g, '-')
-      .toLowerCase();
-    var subfolderName = timestamp + '_' + descSlug;
-    var batchFolder = socialFolder.createFolder(subfolderName);
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          success: true,
+          folderId: batchFolder.getId(),
+          folderName: subfolderName
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
 
-    // Upload all files into the subfolder
-    var uploadedFiles = [];
-    var attachments = [];
-    var files = data.files || [];
-
-    for (var i = 0; i < files.length; i++) {
-      var fileData = files[i];
+    // ---- STEP 2: FILE — upload one file to existing folder ----
+    if (action === 'file') {
+      var folder = DriveApp.getFolderById(data.folderId);
       var blob = Utilities.newBlob(
-        Utilities.base64Decode(fileData.data),
-        fileData.mimeType,
-        fileData.name
+        Utilities.base64Decode(data.fileData),
+        data.mimeType,
+        data.fileName
       );
-      batchFolder.createFile(blob);
-      uploadedFiles.push(fileData.name);
+      folder.createFile(blob);
 
-      // Attach images to the email (skip videos — too large)
-      if (fileData.mimeType && fileData.mimeType.indexOf('image/') === 0) {
-        try {
-          var attachBlob = Utilities.newBlob(
-            Utilities.base64Decode(fileData.data),
-            fileData.mimeType,
-            fileData.name
-          );
-          // Only attach if under 5MB to avoid email size limits
-          if (attachBlob.getBytes().length < 5 * 1024 * 1024) {
-            attachments.push(attachBlob);
+      return ContentService
+        .createTextOutput(JSON.stringify({ success: true, fileName: data.fileName }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ---- STEP 3: FINISH — write metadata + send email ----
+    if (action === 'finish') {
+      var folder = DriveApp.getFolderById(data.folderId);
+      var folderName = data.folderName;
+      var timeHM = Utilities.formatDate(new Date(), 'America/New_York', 'HH-mm');
+      var timestamp = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+      var fileNames = data.fileNames || [];
+
+      // Create metadata text file
+      var metaContent = 'Upload Batch: ' + folderName + '\n'
+        + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
+        + 'Time: ' + timeHM + '\n'
+        + 'Files: ' + fileNames.join(', ') + '\n'
+        + 'File count: ' + fileNames.length + '\n'
+        + '\n--- Context ---\n'
+        + 'Description: ' + (data.description || 'None') + '\n'
+        + 'VIPs/Stakeholders: ' + (data.vips || 'None') + '\n'
+        + 'Event/Location: ' + (data.event || 'None') + '\n'
+        + 'Notes: ' + (data.notes || 'None') + '\n';
+      folder.createFile(folderName + '_info.txt', metaContent, 'text/plain');
+
+      // Collect image attachments from the folder (under 5MB each)
+      var attachments = [];
+      var folderFiles = folder.getFiles();
+      while (folderFiles.hasNext()) {
+        var f = folderFiles.next();
+        var mime = f.getMimeType();
+        if (mime && mime.indexOf('image/') === 0) {
+          try {
+            var fileBlob = f.getBlob();
+            if (fileBlob.getBytes().length < 5 * 1024 * 1024) {
+              attachments.push(fileBlob);
+            }
+          } catch (attachErr) {
+            // Skip on error
           }
-        } catch (attachErr) {
-          // Skip attachment on error, still upload to Drive
         }
       }
+
+      // Generate draft caption
+      var draftCaption = generateCaption(data);
+
+      // Send email
+      var emailSubject = 'JAG Media Upload — ' + (data.description || 'New Upload')
+        + ' (' + fileNames.length + ' file' + (fileNames.length === 1 ? '' : 's') + ')';
+
+      var emailBody = 'New media uploaded to Social Staged\n'
+        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
+        + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
+        + 'Files: ' + fileNames.length + ' (' + fileNames.join(', ') + ')\n'
+        + 'Description: ' + (data.description || 'None') + '\n'
+        + 'VIPs: ' + (data.vips || 'None') + '\n'
+        + 'Event/Location: ' + (data.event || 'None') + '\n'
+        + 'Notes: ' + (data.notes || 'None') + '\n\n'
+        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        + 'DRAFT CAPTION (edit as needed):\n'
+        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
+        + draftCaption + '\n\n'
+        + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+        + 'View folder in Drive: ' + folder.getUrl() + '\n'
+        + 'Uploaded: ' + timestamp + ' ' + timeHM + '\n';
+
+      var emailOptions = {};
+      if (attachments.length > 0) {
+        emailOptions.attachments = attachments;
+      }
+
+      GmailApp.sendEmail(
+        'johnsonadvisorygrp@gmail.com',
+        emailSubject,
+        emailBody,
+        emailOptions
+      );
+
+      return ContentService
+        .createTextOutput(JSON.stringify({ success: true, folder: folderName, fileCount: fileNames.length }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Create metadata text file in the subfolder
-    var metaContent = 'Upload Batch: ' + subfolderName + '\n'
-      + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
-      + 'Time: ' + timeHM + '\n'
-      + 'Files: ' + uploadedFiles.join(', ') + '\n'
-      + 'File count: ' + files.length + '\n'
-      + '\n--- Context ---\n'
-      + 'Description: ' + (data.description || 'None') + '\n'
-      + 'VIPs/Stakeholders: ' + (data.vips || 'None') + '\n'
-      + 'Event/Location: ' + (data.event || 'None') + '\n'
-      + 'Notes: ' + (data.notes || 'None') + '\n';
-    batchFolder.createFile(subfolderName + '_info.txt', metaContent, 'text/plain');
-
-    // Generate draft caption in D12 voice
-    var draftCaption = generateCaption(data);
-
-    // Send email notification with attachments and draft caption
-    var emailSubject = 'JAG Media Upload — ' + (data.description || 'New Upload')
-      + ' (' + files.length + ' file' + (files.length === 1 ? '' : 's') + ')';
-
-    var emailBody = 'New media uploaded to Social Staged\n'
-      + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
-      + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
-      + 'Files: ' + files.length + ' (' + uploadedFiles.join(', ') + ')\n'
-      + 'Description: ' + (data.description || 'None') + '\n'
-      + 'VIPs: ' + (data.vips || 'None') + '\n'
-      + 'Event/Location: ' + (data.event || 'None') + '\n'
-      + 'Notes: ' + (data.notes || 'None') + '\n\n'
-      + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
-      + 'DRAFT CAPTION (edit as needed):\n'
-      + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n'
-      + draftCaption + '\n\n'
-      + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
-      + 'View folder in Drive: ' + batchFolder.getUrl() + '\n'
-      + 'Uploaded: ' + timestamp + ' ' + timeHM + '\n';
-
-    var emailOptions = {};
-    if (attachments.length > 0) {
-      emailOptions.attachments = attachments;
-    }
-
-    GmailApp.sendEmail(
-      'johnsonadvisorygrp@gmail.com',
-      emailSubject,
-      emailBody,
-      emailOptions
-    );
-
+    // Unknown action
     return ContentService
-      .createTextOutput(JSON.stringify({ success: true, folder: subfolderName, fileCount: files.length }))
+      .createTextOutput(JSON.stringify({ success: false, error: 'Unknown action: ' + action }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
