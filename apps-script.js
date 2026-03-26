@@ -150,69 +150,107 @@ function doPost(e) {
 
 /**
  * Generate a draft Instagram caption in the D12 / @councilmanjjones voice.
- * Uses the context fields from the upload form.
+ * Calls Claude API for a real, polished caption. Falls back to template if API fails.
  */
 function generateCaption(data) {
   var desc = data.description || '';
   var vips = data.vips || '';
   var eventLoc = data.event || '';
   var notes = data.notes || '';
+  var uploader = data.uploaderName || 'team member';
 
-  // Build the hook line
-  var hook = '';
-  if (desc) {
-    // Convert description to a natural opening
-    hook = 'We ' + lowerFirst(desc);
-    // Add period if it doesn't end with punctuation
-    if (!/[.!?]$/.test(hook)) hook += '.';
-  } else {
-    hook = 'Great day out in the community.';
+  // Try Claude API first
+  var apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (apiKey) {
+    try {
+      var caption = generateCaptionWithClaude(apiKey, desc, vips, eventLoc, notes, uploader);
+      if (caption) return caption;
+    } catch (err) {
+      Logger.log('Claude API caption failed: ' + err.toString());
+    }
   }
 
-  // Build context paragraph
-  var context = '';
-  if (vips && eventLoc) {
-    context = 'We were joined by ' + vips + ' at ' + eventLoc + '.';
-  } else if (vips) {
-    context = 'We were joined by ' + vips + '.';
-  } else if (eventLoc) {
-    context = 'We were out at ' + eventLoc + '.';
-  }
-
-  // Add notes if present
-  if (notes) {
-    context += (context ? ' ' : '') + notes;
-    if (!/[.!?]$/.test(context)) context += '.';
-  }
-
-  // Build significance line
-  var significance = 'Thank you to everyone who came out and continues to invest in our community.';
-
-  // Build hashtags
-  var hashtags = ['#District12', '#Baltimore'];
-  if (eventLoc) {
-    if (/east/i.test(eventLoc)) hashtags.push('#EastBaltimore');
-    if (/city hall/i.test(eventLoc)) hashtags.push('#BaltimoreCityCouncil');
-  }
-  hashtags.push('#ExploreDistrict12');
-
-  // Assemble caption
-  var parts = [hook];
-  if (context) parts.push(context);
-  parts.push(significance);
-  parts.push(hashtags.join(' '));
-
-  return parts.join('\n\n');
+  // Fallback: simple template
+  return generateCaptionTemplate(desc, vips, eventLoc, notes);
 }
 
 /**
- * Lowercase the first character of a string.
+ * Call Claude API to generate a polished caption.
  */
-function lowerFirst(str) {
-  if (!str) return str;
-  // Don't lowercase if it starts with a proper noun indicator (capital after space)
-  // Just lowercase the very first character
-  return str.charAt(0).toLowerCase() + str.slice(1);
+function generateCaptionWithClaude(apiKey, desc, vips, eventLoc, notes, uploader) {
+  var prompt = 'Write ONE Instagram/Facebook caption for Councilman Jermaine Jones (@councilmanjjones), District 12, Baltimore.\n\n'
+    + 'VOICE RULES:\n'
+    + '- First-person plural: "We", "Our office", "Our community"\n'
+    + '- Warm but substantive — name specific people, organizations, and places\n'
+    + '- 2-3 short paragraphs + hashtags at the end\n'
+    + '- Do NOT use generic filler. Be specific to the details provided.\n'
+    + '- Capitalize proper nouns and organization names correctly\n'
+    + '- Include a call to action when appropriate\n\n'
+    + 'UPLOAD CONTEXT:\n'
+    + '- Description: ' + (desc || 'Not provided') + '\n'
+    + '- VIPs/Stakeholders: ' + (vips || 'Not provided') + '\n'
+    + '- Event/Location: ' + (eventLoc || 'Not provided') + '\n'
+    + '- Notes: ' + (notes || 'Not provided') + '\n\n'
+    + 'Write ONLY the caption text (paragraphs + hashtags). No labels, no options, no explanations.';
+
+  var payload = {
+    'model': 'claude-sonnet-4-20250514',
+    'max_tokens': 500,
+    'messages': [{ 'role': 'user', 'content': prompt }]
+  };
+
+  var options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'headers': {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    'payload': JSON.stringify(payload),
+    'muteHttpExceptions': true
+  };
+
+  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', options);
+  var result = JSON.parse(response.getContentText());
+
+  if (result.content && result.content[0] && result.content[0].text) {
+    return result.content[0].text.trim();
+  }
+
+  Logger.log('Claude API unexpected response: ' + JSON.stringify(result));
+  return null;
+}
+
+/**
+ * Fallback template caption when Claude API is unavailable.
+ */
+function generateCaptionTemplate(desc, vips, eventLoc, notes) {
+  var parts = [];
+
+  if (desc) {
+    parts.push('Great to be out in the community for ' + desc + '.');
+  } else {
+    parts.push('Great day out in the community.');
+  }
+
+  if (vips && eventLoc) {
+    parts.push('We were joined by ' + vips + ' at ' + eventLoc + '.');
+  } else if (vips) {
+    parts.push('We were joined by ' + vips + '.');
+  } else if (eventLoc) {
+    parts.push('We were out at ' + eventLoc + '.');
+  }
+
+  if (notes) {
+    parts.push(notes + (!/[.!?]$/.test(notes) ? '.' : ''));
+  }
+
+  parts.push('Thank you to everyone who came out and continues to invest in our community.');
+
+  var hashtags = ['#District12', '#Baltimore', '#ExploreDistrict12'];
+  parts.push(hashtags.join(' '));
+
+  return parts.join('\n\n');
 }
 
 function getOrCreateFolder(path) {
