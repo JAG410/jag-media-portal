@@ -17,6 +17,16 @@
 // 7. Click "Deploy"
 // ============================================================
 
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : '';
+  if (action === 'getRecent') {
+    return getRecentUploads();
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ success: false, error: 'Unknown GET action' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
@@ -65,7 +75,10 @@ function doPost(e) {
       var timestamp = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
       var fileNames = data.fileNames || [];
 
-      // Create metadata text file
+      // Generate draft caption first (saved to info file + email)
+      var draftCaption = generateCaption(data);
+
+      // Create metadata text file (includes caption for Recent Uploads)
       var metaContent = 'Upload Batch: ' + folderName + '\n'
         + 'Uploaded by: ' + (data.uploaderName || 'Unknown') + '\n'
         + 'Time: ' + timeHM + '\n'
@@ -75,7 +88,9 @@ function doPost(e) {
         + 'Description: ' + (data.description || 'None') + '\n'
         + 'VIPs/Stakeholders: ' + (data.vips || 'None') + '\n'
         + 'Event/Location: ' + (data.event || 'None') + '\n'
-        + 'Notes: ' + (data.notes || 'None') + '\n';
+        + 'Notes: ' + (data.notes || 'None') + '\n'
+        + '\n--- AI Caption Draft ---\n'
+        + draftCaption + '\n';
       folder.createFile(folderName + '_info.txt', metaContent, 'text/plain');
 
       // Collect image attachments from the folder (under 5MB each)
@@ -95,9 +110,6 @@ function doPost(e) {
           }
         }
       }
-
-      // Generate draft caption
-      var draftCaption = generateCaption(data);
 
       // Send email
       var emailSubject = 'JAG Media Upload -' + (data.description || 'New Upload')
@@ -134,6 +146,11 @@ function doPost(e) {
       return ContentService
         .createTextOutput(JSON.stringify({ success: true, folder: folderName, fileCount: fileNames.length }))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ---- GET RECENT: return last 5 uploads with metadata + thumbnails ----
+    if (action === 'getRecent') {
+      return getRecentUploads();
     }
 
     // Unknown action
@@ -251,6 +268,107 @@ function generateCaptionTemplate(desc, vips, eventLoc, notes) {
   parts.push(hashtags.join(' '));
 
   return parts.join('\n\n');
+}
+
+/**
+ * Return metadata for the 5 most recent uploads in Social Staged.
+ * Includes one base64 thumbnail per upload (if image is under 500KB).
+ */
+function getRecentUploads() {
+  var socialFolder;
+  try {
+    socialFolder = getOrCreateFolder('D12 Pipeline/Social Staged');
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ success: true, uploads: [] }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var subfolders = socialFolder.getFolders();
+  var folders = [];
+  while (subfolders.hasNext()) {
+    var sf = subfolders.next();
+    folders.push({
+      name: sf.getName(),
+      date: sf.getDateCreated(),
+      id: sf.getId()
+    });
+  }
+
+  // Sort by creation date descending, keep 5
+  folders.sort(function(a, b) { return b.date - a.date; });
+  folders = folders.slice(0, 5);
+
+  var results = [];
+  for (var i = 0; i < folders.length; i++) {
+    var f = folders[i];
+    var folder = DriveApp.getFolderById(f.id);
+    var files = folder.getFiles();
+    var fileCount = 0;
+    var infoText = '';
+    var thumbnail = '';
+
+    while (files.hasNext()) {
+      var file = files.next();
+      var name = file.getName();
+      var mime = file.getMimeType() || '';
+
+      if (name.indexOf('_info.txt') > -1) {
+        try { infoText = file.getBlob().getDataAsString(); } catch(e) {}
+        continue;
+      }
+
+      fileCount++;
+
+      // Get first image as base64 thumbnail (skip if > 500KB)
+      if (mime.indexOf('image/') === 0 && !thumbnail) {
+        try {
+          var blob = file.getBlob();
+          var bytes = blob.getBytes();
+          if (bytes.length < 500000) {
+            thumbnail = 'data:' + mime + ';base64,' + Utilities.base64Encode(bytes);
+          }
+        } catch(e) {}
+      }
+    }
+
+    // Parse info text for metadata
+    var uploader = 'Unknown';
+    var description = '';
+    var caption = '';
+    if (infoText) {
+      var m;
+      m = infoText.match(/Uploaded by:\s*(.+)/);
+      if (m) uploader = m[1].trim();
+      m = infoText.match(/Description:\s*(.+)/);
+      if (m && m[1].trim() !== 'None') description = m[1].trim();
+      var captionIdx = infoText.indexOf('--- AI Caption Draft ---');
+      if (captionIdx > -1) {
+        caption = infoText.substring(captionIdx + 24).trim();
+        if (caption.length > 200) caption = caption.substring(0, 200) + '...';
+      }
+    }
+
+    // Fallback description from folder name slug
+    if (!description) {
+      var slug = f.name.length > 11 ? f.name.substring(11) : f.name;
+      description = slug.replace(/-/g, ' ');
+    }
+
+    results.push({
+      folderName: f.name,
+      date: Utilities.formatDate(f.date, 'America/New_York', 'yyyy-MM-dd'),
+      uploader: uploader,
+      description: description,
+      caption: caption,
+      fileCount: fileCount,
+      thumbnail: thumbnail
+    });
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ success: true, uploads: results }))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function getOrCreateFolder(path) {

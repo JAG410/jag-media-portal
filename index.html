@@ -260,6 +260,70 @@
       text-transform: uppercase;
       font-weight: 500;
     }
+    /* Recent Uploads */
+    .recent-section {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid #c9a84c30;
+    }
+    .recent-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #c9a84c;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .recent-loading {
+      text-align: center;
+      font-size: 14px;
+      color: #86868b;
+      padding: 20px 0;
+    }
+    .recent-card {
+      background: #1c1c1e;
+      border: 1px solid #c9a84c25;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .recent-thumbs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .recent-thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid #333;
+    }
+    .recent-desc {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f5f5f7;
+      text-transform: capitalize;
+      margin-bottom: 4px;
+    }
+    .recent-meta {
+      font-size: 12px;
+      color: #86868b;
+      margin-bottom: 6px;
+    }
+    .recent-caption {
+      font-size: 12px;
+      color: #a0a0a5;
+      line-height: 1.4;
+      max-height: 40px;
+      overflow: hidden;
+      font-style: italic;
+    }
+    .recent-empty {
+      text-align: center;
+      font-size: 13px;
+      color: #636366;
+      padding: 16px 0;
+    }
   </style>
 </head>
 <body>
@@ -319,6 +383,16 @@
       <div class="status" id="status"></div>
       <button type="button" class="upload-more-btn" id="uploadMoreBtn">Upload Another Batch</button>
     </form>
+  </div>
+
+  <!-- Recent Uploads -->
+  <div class="container">
+    <div class="recent-section" id="recentSection">
+      <div class="recent-title">Recent Uploads</div>
+      <div id="recentList">
+        <div class="recent-loading">Loading recent uploads...</div>
+      </div>
+    </div>
   </div>
 
   <div class="footer">
@@ -652,6 +726,48 @@
       progressBar.style.width = '0%';
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
+
+    // ── Recent Uploads ──────────────────────────────────────────────
+    async function loadRecentUploads() {
+      const listEl = document.getElementById('recentList');
+      try {
+        const response = await fetch(SCRIPT_URL + '?action=getRecent');
+        const text = await response.text();
+        let data;
+        try { data = JSON.parse(text); } catch(e) {
+          listEl.innerHTML = '<div class="recent-empty">Could not load recent uploads.</div>';
+          return;
+        }
+        if (!data.success || !data.uploads || data.uploads.length === 0) {
+          listEl.innerHTML = '<div class="recent-empty">No uploads yet.</div>';
+          return;
+        }
+
+        let html = '';
+        data.uploads.forEach(function(u) {
+          const thumbHtml = u.thumbnail
+            ? '<div class="recent-thumbs"><img class="recent-thumb" src="' + escapeHtml(u.thumbnail) + '" alt="thumbnail"></div>'
+            : '';
+          const dateStr = u.date || '';
+          const capHtml = u.caption
+            ? '<div class="recent-caption">' + escapeHtml(u.caption) + '</div>'
+            : '';
+          html += '<div class="recent-card">'
+            + thumbHtml
+            + '<div class="recent-desc">' + escapeHtml(u.description) + '</div>'
+            + '<div class="recent-meta">' + escapeHtml(u.uploader) + ' &middot; ' + escapeHtml(dateStr) + ' &middot; ' + u.fileCount + ' file' + (u.fileCount === 1 ? '' : 's') + '</div>'
+            + capHtml
+            + '</div>';
+        });
+        listEl.innerHTML = html;
+      } catch (err) {
+        listEl.innerHTML = '<div class="recent-empty">Could not load recent uploads.</div>';
+        console.error('Recent uploads error:', err);
+      }
+    }
+
+    // Load recent uploads on page load
+    loadRecentUploads();
   </script>
 </body>
 </html>
